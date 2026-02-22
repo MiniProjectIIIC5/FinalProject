@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: profile-verifier-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PYTHON_PATH
+        value: python3
