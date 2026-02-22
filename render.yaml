@@ -1,15 +1,7 @@
-services:
-  - type: web
-    name: profile-verifier-backend
-    env: node
-    buildCommand: npm install
-    startCommand: node server.js
-    envVars:
-      - key: PORT
-        value: 5000
-      - key: MONGO_URI
-        sync: false
-      - key: JWT_SECRET
-        sync: false
-      - key: PYTHON_PATH
-        value: python3
+buildCommand: pip install -r requirements.txt && npm install
+```
+
+### Step 5 — Get your Render backend URL
+
+After deployment you'll get a URL like:
+https://finalproject-14we.onrender.com
