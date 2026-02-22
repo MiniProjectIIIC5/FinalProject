@@ -5,12 +5,6 @@
 const API = window.location.hostname === 'localhost'
   ? 'http://localhost:5000/api'
   : 'https://finalproject-14we.onrender.com/api';
-const cors = require("cors");
-app.use(cors({
-  origin: "https://profileverifier.netlify.app",
-  methods: ["GET", "POST"],
-  credentials: true
-}));
 // ── State ──────────────────────────────────────
 let token       = localStorage.getItem('pv_token')  || null;
 let currentUser = JSON.parse(localStorage.getItem('pv_user') || 'null');
