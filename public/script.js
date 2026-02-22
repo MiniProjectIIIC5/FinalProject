@@ -2,7 +2,9 @@
    PROFILE VERIFIER — FRONTEND SCRIPT
 ══════════════════════════════════════════════ */
 
-const API = 'http://localhost:5000/api';
+const API = window.location.hostname === 'localhost'
+  ? 'http://localhost:5000/api'
+  : 'https://finalproject-14we.onrender.com/api';
 
 // ── State ──────────────────────────────────────
 let token       = localStorage.getItem('pv_token')  || null;
