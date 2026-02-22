@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile Verification System</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     AUTH CONTAINER
+════════════════════════════════════════════════ -->
+<div id="auth-container" class="auth-wrapper">
+  <div class="auth-card">
+
+    <!-- Left panel -->
+    <div class="auth-left">
+      <div class="auth-brand">
+        <div class="brand-icon">🔍</div>
+        <h1>Profile<br/>Verifier</h1>
+        <p>Detect fake profiles on Instagram, LinkedIn & more using AI</p>
+      </div>
+      <div class="auth-social">
+        <p class="social-label">Quick access</p>
+        <button class="social-btn" onclick="showToast('OAuth coming soon!','info')">
+          <span>𝐌</span> Continue with Microsoft
+        </button>
+        <button class="social-btn" onclick="showToast('OAuth coming soon!','info')">
+          <span>G</span> Continue with Google
+        </button>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="auth-right">
+      <!-- Sign In -->
+      <form id="signinForm" class="auth-form active" novalidate>
+        <h2>Welcome back</h2>
+        <p class="auth-sub">Sign in to your account</p>
+
+        <div class="field">
+          <label for="signinEmail">Email</label>
+          <input type="email" id="signinEmail" placeholder="you@example.com" autocomplete="email" required />
+          <span class="field-err" id="err-signinEmail"></span>
+        </div>
+        <div class="field">
+          <label for="signinPassword">Password</label>
+          <div class="pass-wrap">
+            <input type="password" id="signinPassword" placeholder="••••••••" autocomplete="current-password" required />
+            <button type="button" class="toggle-pass" onclick="togglePass('signinPassword',this)">👁</button>
+          </div>
+          <span class="field-err" id="err-signinPassword"></span>
+        </div>
+
+        <button type="submit" class="btn btn-auth" id="signinBtn">
+          <span class="btn-text">Sign In</span>
+          <span class="btn-spinner" style="display:none">⟳</span>
+        </button>
+        <p class="auth-switch">Don't have an account? <a href="#" onclick="showSignup();return false;">Sign up</a></p>
+      </form>
+
+      <!-- Sign Up -->
+      <form id="signupForm" class="auth-form" novalidate>
+        <h2>Create account</h2>
+        <p class="auth-sub">Join Profile Verifier today</p>
+
+        <div class="field">
+          <label for="signupUsername">Username</label>
+          <input type="text" id="signupUsername" placeholder="cooluser123" autocomplete="username" required />
+          <span class="field-err" id="err-signupUsername"></span>
+        </div>
+        <div class="field">
+          <label for="signupEmail">Email</label>
+          <input type="email" id="signupEmail" placeholder="you@example.com" autocomplete="email" required />
+          <span class="field-err" id="err-signupEmail"></span>
+        </div>
+        <div class="field">
+          <label for="signupPassword">Password</label>
+          <div class="pass-wrap">
+            <input type="password" id="signupPassword" placeholder="Min. 6 characters" autocomplete="new-password" required />
+            <button type="button" class="toggle-pass" onclick="togglePass('signupPassword',this)">👁</button>
+          </div>
+          <span class="field-err" id="err-signupPassword"></span>
+        </div>
+
+        <button type="submit" class="btn btn-auth" id="signupBtn">
+          <span class="btn-text">Create Account</span>
+          <span class="btn-spinner" style="display:none">⟳</span>
+        </button>
+        <p class="auth-switch">Already have an account? <a href="#" onclick="showSignin();return false;">Sign in</a></p>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     MAIN APP CONTAINER
+════════════════════════════════════════════════ -->
+<div id="app-container" style="display:none;">
+  <div class="app-shell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-logo">🔍</span>
+        <span class="brand-name">Verifier</span>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="dashboard">
+          <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-tab="verify">
+          <span class="nav-icon">🔎</span><span class="nav-label">Verify Profile</span>
+        </button>
+        <button class="nav-item" data-tab="history">
+          <span class="nav-icon">📋</span><span class="nav-label">History</span>
+        </button>
+        <button class="nav-item" data-tab="report">
+          <span class="nav-icon">🚩</span><span class="nav-label">Report</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="user-avatar" id="userAvatar">U</div>
+          <div class="user-info">
+            <span class="user-name" id="userNameDisplay">User</span>
+            <span class="user-role">Member</span>
+          </div>
+        </div>
+        <button class="btn-logout" onclick="logout()" title="Sign out">⏻</button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+
+      <!-- ── DASHBOARD ─────────────────────────────── -->
+      <section id="dashboard" class="tab-page active">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Dashboard</h2>
+            <p class="page-sub">Today's activity overview</p>
+          </div>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-tile">
+            <div class="stat-icon">✅</div>
+            <div class="stat-body">
+              <span class="stat-num" id="stat-total">0</span>
+              <span class="stat-lbl">Total Today</span>
+            </div>
+          </div>
+          <div class="stat-tile danger">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-body">
+              <span class="stat-num" id="stat-fake">0</span>
+              <span class="stat-lbl">Fake Detected</span>
+            </div>
+          </div>
+          <div class="stat-tile success">
+            <div class="stat-icon">🛡️</div>
+            <div class="stat-body">
+              <span class="stat-num" id="stat-real">0</span>
+              <span class="stat-lbl">Verified Real</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <h3 class="section-title">Quick Verify</h3>
+          <p class="section-sub">Pick a platform and paste the profile URL</p>
+          <div class="platform-grid">
+            <div class="platform-tile" data-platform="instagram" onclick="selectPlatform(this)">
+              <span class="pt-icon">📷</span>
+              <span class="pt-name">Instagram</span>
+            </div>
+            <div class="platform-tile" data-platform="linkedin" onclick="selectPlatform(this)">
+              <span class="pt-icon">💼</span>
+              <span class="pt-name">LinkedIn</span>
+            </div>
+            <div class="platform-tile" data-platform="twitter" onclick="selectPlatform(this)">
+              <span class="pt-icon">🐦</span>
+              <span class="pt-name">Twitter / X</span>
+            </div>
+            <div class="platform-tile" data-platform="facebook" onclick="selectPlatform(this)">
+              <span class="pt-icon">📘</span>
+              <span class="pt-name">Facebook</span>
+            </div>
+            <div class="platform-tile" data-platform="tiktok" onclick="selectPlatform(this)">
+              <span class="pt-icon">🎵</span>
+              <span class="pt-name">TikTok</span>
+            </div>
+            <div class="platform-tile" data-platform="other" onclick="selectPlatform(this)">
+              <span class="pt-icon">🌐</span>
+              <span class="pt-name">Other</span>
+            </div>
+          </div>
+          <form id="quick-form" class="quick-form" style="display:none;" onsubmit="quickVerify(event)">
+            <input type="url" id="quick-url" placeholder="Paste profile URL here…" required />
+            <button type="submit" class="btn btn-primary">Verify →</button>
+          </form>
+        </div>
+
+        <div class="section-card" id="recent-section" style="display:none;">
+          <h3 class="section-title">Recent Verifications</h3>
+          <div id="recent-list" class="recent-list"></div>
+        </div>
+      </section>
+
+      <!-- ── VERIFY ─────────────────────────────────── -->
+      <section id="verify" class="tab-page">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Verify Profile</h2>
+            <p class="page-sub">Analyse any social media profile for authenticity</p>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="verify-tabs">
+            <button class="vtab active" data-vt="standard" onclick="switchVerifyTab('standard',this)">Standard</button>
+            <button class="vtab" data-vt="linkedin" onclick="switchVerifyTab('linkedin',this)">LinkedIn</button>
+          </div>
+
+          <!-- Standard form -->
+          <form id="vf-standard" class="vform active" onsubmit="submitVerify(event,'standard')">
+            <div class="field">
+              <label for="v-platform">Platform</label>
+              <select id="v-platform" required>
+                <option value="">Select platform…</option>
+                <option value="instagram">Instagram</option>
+                <option value="twitter">Twitter / X</option>
+                <option value="facebook">Facebook</option>
+                <option value="tiktok">TikTok</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="v-url">Profile URL</label>
+              <input type="url" id="v-url" placeholder="https://instagram.com/username" required />
+            </div>
+            <button type="submit" class="btn btn-primary">Analyse Profile</button>
+          </form>
+
+          <!-- LinkedIn form -->
+          <form id="vf-linkedin" class="vform" onsubmit="submitVerify(event,'linkedin')">
+            <div class="field">
+              <label for="vl-url">LinkedIn Profile URL</label>
+              <input type="url" id="vl-url" placeholder="https://linkedin.com/in/username" required />
+            </div>
+            <div class="field">
+              <label for="vl-img">Profile Picture <span class="optional">(optional)</span></label>
+              <input type="file" id="vl-img" accept="image/*" />
+            </div>
+            <button type="submit" class="btn btn-primary">Analyse Profile</button>
+          </form>
+        </div>
+
+        <!-- Loading -->
+        <div id="v-loading" class="loading-card" style="display:none;">
+          <div class="loader-ring"></div>
+          <p>Analysing profile…</p>
+        </div>
+
+        <!-- Result -->
+        <div id="v-result" class="result-card" style="display:none;">
+          <div id="v-result-inner"></div>
+          <div id="v-actions" class="result-actions"></div>
+        </div>
+      </section>
+
+      <!-- ── HISTORY ─────────────────────────────────── -->
+      <section id="history" class="tab-page">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Verification History</h2>
+            <p class="page-sub">Browse and manage your past verifications</p>
+          </div>
+          <button class="btn btn-secondary" onclick="loadHistory()">↻ Refresh</button>
+        </div>
+
+        <div class="section-card">
+          <div class="filter-bar">
+            <select id="filter-platform" onchange="loadHistory()">
+              <option value="all">All Platforms</option>
+              <option value="instagram">Instagram</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="twitter">Twitter</option>
+              <option value="facebook">Facebook</option>
+              <option value="tiktok">TikTok</option>
+              <option value="other">Other</option>
+            </select>
+            <select id="filter-result" onchange="loadHistory()">
+              <option value="all">All Results</option>
+              <option value="fake">Fake Only</option>
+              <option value="real">Real Only</option>
+            </select>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Platform</th>
+                  <th>Result</th>
+                  <th>Confidence</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody">
+                <tr><td colspan="6" class="empty-row">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── REPORT ─────────────────────────────────── -->
+      <section id="report" class="tab-page">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Report a Profile</h2>
+            <p class="page-sub">Flag suspicious profiles for further action</p>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div id="report-no-url" style="text-align:center;padding:40px 0;">
+            <div style="font-size:3em;">🚩</div>
+            <p style="margin-top:10px;color:#888;">Verify a suspicious profile first, then click "Report" to file a report here.</p>
+          </div>
+          <div id="report-form-area" style="display:none;">
+            <div class="report-url-box">
+              <span class="report-label">Profile URL</span>
+              <span id="report-url-display" class="report-url"></span>
+            </div>
+
+            <div class="report-steps">
+              <div class="report-step" id="rstep1">
+                <div class="step-num">1</div>
+                <div class="step-body">
+                  <p>Click the button below to open the platform's official report page.</p>
+                  <button class="btn btn-primary" onclick="openPlatformReport()">Open Platform Report Page ↗</button>
+                </div>
+              </div>
+              <div class="report-step" id="rstep2" style="display:none;">
+                <div class="step-num">2</div>
+                <div class="step-body">
+                  <p>Did you successfully report on the platform?</p>
+                  <div class="report-btns">
+                    <button class="btn btn-success" onclick="handleReportedYes()">✓ Yes, I reported it</button>
+                    <button class="btn btn-ghost"   onclick="handleReportedNo()">✗ No, not yet</button>
+                  </div>
+                </div>
+              </div>
+              <div class="report-step" id="rstep3" style="display:none;">
+                <div class="step-num">3</div>
+                <div class="step-body" id="report-final-msg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast" style="display:none;"></div>
+
+<!-- Report Modal -->
+<div id="report-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Report This Profile</h3>
+      <button class="modal-x" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p>Our analysis flagged this profile as potentially fake.</p>
+      <p>For the strongest action, report it directly on the platform too.</p>
+      <div class="modal-note">After reporting on the platform, click <strong>I Have Reported</strong>.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="openPlatformReport()">Open Platform Page ↗</button>
+      <button class="btn btn-primary"   onclick="confirmReport()">I Have Reported</button>
+      <button class="btn btn-ghost"     onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

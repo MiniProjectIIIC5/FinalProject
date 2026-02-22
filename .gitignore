@@ -1,0 +1,19 @@
+# Secret keys - never upload these
+.env
+
+# Dependencies - no need to upload
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# ML model files (large files)
+ml/model.pkl
+ml/scaler.pkl
+ml/features.json
+
+# OS files
+.DS_Store
+Thumbs.db
