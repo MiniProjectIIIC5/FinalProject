@@ -1,0 +1,38 @@
+{
+  "features": [
+    "username_len",
+    "digit_count",
+    "digit_ratio",
+    "special_count",
+    "alpha_count",
+    "vowel_ratio",
+    "entropy",
+    "all_digits",
+    "no_alpha",
+    "no_vowels",
+    "trailing_digits4",
+    "digit_block",
+    "repeating_chars",
+    "suspicious_keyword",
+    "uuid_like",
+    "has_profile_pic",
+    "verified",
+    "bio_length",
+    "follower_following_ratio",
+    "posts_per_follower"
+  ],
+  "n_features": 20,
+  "model_type": "RandomForestClassifier",
+  "metrics": {
+    "accuracy": 0.9361,
+    "roc_auc": 0.9827,
+    "cv_mean": 0.9814,
+    "cv_std": 0.0027,
+    "n_train": 6254,
+    "n_test": 1564,
+    "class_dist": {
+      "real": 5318,
+      "fake": 2500
+    }
+  }
+}

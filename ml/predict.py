@@ -5,12 +5,16 @@ Can be called two ways (server.js uses args):
   1. python predict.py "https://instagram.com/username"   ← used by server
   2. echo '{"url":"..."}' | python predict.py             ← stdin fallback
 
+Optional second arg — JSON profile metadata (all fields optional):
+  python predict.py "https://x.com/john" '{"followers":120,"following":80,"posts":30,"has_pic":1,"verified":0,"bio_len":45}'
+
 Outputs JSON to stdout:
-  {"prediction":"Fake"|"Real", "confidence":0.xx, "method":"...", ...}
+  {"prediction":"Fake"|"Real", "confidence":0.xx, "method":"...", "username":"...", "features":{...}}
 
 Priority:
-  1. Use trained model.pkl + scaler.pkl if both classes present
-  2. Fall back to calibrated heuristic engine (always available)
+  1. Hard rules  — catches obvious cases instantly, runs BEFORE the ML model
+  2. ML model    — uses model.pkl + scaler.pkl if both classes are present
+  3. Heuristic   — calibrated fallback, always available
 """
 
 import sys
@@ -30,6 +34,7 @@ FEATURES_PATH = SCRIPT_DIR / "features.json"
 _model         = None
 _scaler        = None
 _feature_names = None
+_model_metrics = {}
 _using_ml      = False
 
 try:
@@ -43,7 +48,9 @@ try:
         if hasattr(_model, "classes_") and 0 in _model.classes_ and 1 in _model.classes_:
             if FEATURES_PATH.exists():
                 with open(FEATURES_PATH) as f:
-                    _feature_names = json.load(f).get("features", [])
+                    _meta          = json.load(f)
+                    _feature_names = _meta.get("features", [])
+                    _model_metrics = _meta.get("metrics", {})
             _using_ml = True
         else:
             _model = _scaler = None   # broken / single-class model
@@ -52,20 +59,23 @@ except Exception:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FEATURE EXTRACTION
+#  CONSTANTS  (kept in sync with train_model.py)
 # ══════════════════════════════════════════════════════════════════════════════
 SUSPICIOUS_KW = {
-    "bot","fake","scam","spam","hack","temp","xyz","anon",
-    "xxx","adult","promo","giveaway","f4f","l4l","onlyfan",
-    "follow4follow","like4like","viral","offi","official2",
+    "bot", "fake", "scam", "spam", "hack", "temp", "xyz", "anon",
+    "xxx", "adult", "promo", "giveaway", "f4f", "l4l", "onlyfan",
+    "follow4follow", "like4like", "viral", "offi", "official2",
 }
 VOWELS = set("aeiouAEIOU")
 
 
-def _entropy(s):
+# ══════════════════════════════════════════════════════════════════════════════
+#  UTILITIES
+# ══════════════════════════════════════════════════════════════════════════════
+def _entropy(s: str) -> float:
     if not s:
         return 0.0
-    freq = {}
+    freq: dict = {}
     for c in s.lower():
         freq[c] = freq.get(c, 0) + 1
     n = len(s)
@@ -73,16 +83,27 @@ def _entropy(s):
 
 
 def extract_username(url: str) -> str:
-    """Pull last meaningful path segment from a URL."""
-    url = url.strip().rstrip("/")
-    url = re.split(r"[?#]", url)[0]
+    """Pull the last meaningful path segment from a URL or plain username."""
+    url   = url.strip().rstrip("/")
+    url   = re.split(r"[?#]", url)[0]
     parts = [p for p in url.split("/")
              if p and not p.startswith("http") and "." not in p]
     return parts[-1] if parts else url.split("/")[-1]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  FEATURE EXTRACTION
+#  22 features — superset of the 20 used during training.
+#  The ML path selects exactly the names stored in features.json.
+#  The heuristic path uses all 22.
+# ══════════════════════════════════════════════════════════════════════════════
 def build_features(username: str, profile: dict = None) -> dict:
-    """Return 22-feature dict. All values are numeric."""
+    """
+    Return a dict of numeric features.
+
+    profile keys (all optional):
+        followers, following, posts, has_pic, verified, bio_len
+    """
     if profile is None:
         profile = {}
 
@@ -107,17 +128,19 @@ def build_features(username: str, profile: dict = None) -> dict:
         "alpha_count":              alpha,
         "vowel_ratio":              round(vowels_n / (n + 1e-5), 4),
         "entropy":                  round(_entropy(u), 4),
+
         # ── boolean username signals ──────────────────────────────────────
         "all_digits":               int(u.isdigit()),
         "no_alpha":                 int(alpha == 0),
-        "very_short":               int(n <= 3),           # ← catches "1","12","ab"
-        "only_one_char":            int(n == 1),           # ← strongest signal
+        "very_short":               int(n <= 3),
+        "only_one_char":            int(n == 1),
         "no_vowels":                int(n >= 5 and vowels_n == 0),
         "trailing_digits4":         int(bool(re.search(r"\d{4,}$", u))),
         "digit_block":              int(bool(re.search(r"[A-Za-z]{2,}\d{4,}", u))),
         "repeating_chars":          int(bool(re.search(r"(.)\1{3,}", u))),
         "suspicious_keyword":       int(any(kw in lower for kw in SUSPICIOUS_KW)),
         "uuid_like":                int(bool(re.match(r"^[a-f0-9]{8,}$", lower))),
+
         # ── profile metadata ──────────────────────────────────────────────
         "has_profile_pic":          float(profile.get("has_pic",  1)),
         "verified":                 float(profile.get("verified", 0)),
@@ -128,31 +151,56 @@ def build_features(username: str, profile: dict = None) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  HARD-RULE PRE-CHECK  — catches obvious cases before any scoring
+#  HARD-RULE PRE-CHECK
+#  Runs BEFORE the ML model — catches cases where username signals are
+#  unambiguous regardless of what the model was trained on.
 # ══════════════════════════════════════════════════════════════════════════════
-def hard_rules(username: str) -> tuple:
+def hard_rules(username: str):
     """
-    Returns (is_fake: bool, confidence: float, reason: str) or (None,…) if
-    no hard rule fires.
+    Returns (is_fake: bool, confidence: float, reason: str).
+    Returns (None, 0.0, '') if no rule fires.
     """
-    u = username.strip()
-    n = len(u)
+    u     = username.strip()
+    lower = u.lower()
+    n     = len(u)
 
-    # Single character usernames are never real social media profiles
+    digits   = sum(c.isdigit() for c in u)
+    vowels_n = sum(c in VOWELS for c in u)
+    d_ratio  = digits / (n + 1e-5)
+
+    # ── Absolute rules ────────────────────────────────────────────────────
     if n <= 1:
         return True, 0.97, "single_char_username"
 
-    # Pure digits of any length
     if u.isdigit():
         return True, 0.95, "pure_digit_username"
 
-    # 2-char all-digits  e.g. "12"
-    if n == 2 and sum(c.isdigit() for c in u) == 2:
+    if n == 2 and digits == 2:
         return True, 0.92, "two_digit_username"
 
-    # Username is just special chars
     if all(c in "._-" for c in u):
         return True, 0.96, "only_special_chars"
+
+    # UUID-like hex string (e.g. "a3f9c2e1b7d04582")
+    if re.match(r"^[a-f0-9]{8,}$", lower):
+        return True, 0.93, "uuid_like_username"
+
+    # ── Compound rules — suspicious keyword + at least one digit signal ──
+    # These catch patterns like: botaccount9274, fakeperson123456, spamuser88
+    has_sus_kw      = any(kw in lower for kw in SUSPICIOUS_KW)
+    has_trailing4   = bool(re.search(r"\d{4,}$", u))
+    has_digit_block = bool(re.search(r"[A-Za-z]{2,}\d{4,}", u))
+
+    if has_sus_kw and (has_trailing4 or has_digit_block or d_ratio > 0.30):
+        return True, 0.91, "suspicious_keyword_plus_digits"
+
+    # Suspicious keyword with no vowels (e.g. "btkr_xyz", "spmbrt")
+    if has_sus_kw and n >= 5 and vowels_n == 0:
+        return True, 0.89, "suspicious_keyword_no_vowels"
+
+    # Suspicious keyword alone — still fairly strong signal
+    if has_sus_kw:
+        return True, 0.82, "suspicious_keyword"
 
     return None, 0.0, ""
 
@@ -161,8 +209,14 @@ def hard_rules(username: str) -> tuple:
 #  ML MODEL PATH
 # ══════════════════════════════════════════════════════════════════════════════
 def predict_with_model(username: str, profile: dict = None) -> dict:
+    """Use the trained RandomForest model for prediction."""
     fv  = build_features(username, profile)
-    vec = [fv.get(name, 0.0) for name in _feature_names] if _feature_names else list(fv.values())
+
+    # Select and order features exactly as seen during training
+    if _feature_names:
+        vec = [fv.get(name, 0.0) for name in _feature_names]
+    else:
+        vec = list(fv.values())
 
     import numpy as np
     X   = np.array(vec, dtype=float).reshape(1, -1)
@@ -182,10 +236,11 @@ def predict_with_model(username: str, profile: dict = None) -> dict:
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HEURISTIC FALLBACK
+#  Used when no trained model is available.
 # ══════════════════════════════════════════════════════════════════════════════
 WEIGHTS = {
-    "only_one_char":        0.40,   # strongest — single char = almost always fake
-    "very_short":           0.25,   # 2-3 chars
+    "only_one_char":        0.40,
+    "very_short":           0.25,
     "all_digits":           0.25,
     "no_alpha":             0.22,
     "trailing_digits4":     0.20,
@@ -197,8 +252,8 @@ WEIGHTS = {
     "high_digit_ratio":     0.14,
     "high_entropy":         0.09,
 }
-MAX_W       = sum(WEIGHTS.values())   # ≈ 2.45
-FAKE_THRESH = 0.12                    # normalised score above this → Fake
+MAX_W       = sum(WEIGHTS.values())
+FAKE_THRESH = 0.12
 
 
 def predict_heuristic(username: str, profile: dict = None) -> dict:
@@ -237,13 +292,24 @@ def predict_heuristic(username: str, profile: dict = None) -> dict:
 #  MAIN DISPATCHER
 # ══════════════════════════════════════════════════════════════════════════════
 def predict(url: str, profile: dict = None) -> dict:
+    """
+    Full prediction pipeline:
+      1. Extract username from URL
+      2. Apply hard rules  ← always runs, even if ML model is loaded
+      3. ML model (if available)
+      4. Heuristic fallback
+    """
     username = extract_username(url)
 
     if not username:
-        return {"prediction": "Real", "confidence": 0.55,
-                "method": "default", "username": ""}
+        return {
+            "prediction": "Real",
+            "confidence": 0.55,
+            "method":     "default",
+            "username":   "",
+        }
 
-    # ── Hard rules first (catches single-char, pure-digit, etc.) ──────────
+    # ── 1. Hard rules — run BEFORE ML model ───────────────────────────────
     is_fake, conf, reason = hard_rules(username)
     if is_fake is not None:
         fv = build_features(username, profile)
@@ -255,26 +321,24 @@ def predict(url: str, profile: dict = None) -> dict:
             "features":   {k: round(float(v), 3) for k, v in fv.items()},
         }
 
-    # ── ML model (if trained & valid) ──────────────────────────────────────
+    # ── 2. ML model ───────────────────────────────────────────────────────
     if _using_ml:
         return predict_with_model(username, profile)
 
-    # ── Heuristic fallback ─────────────────────────────────────────────────
+    # ── 3. Heuristic fallback ─────────────────────────────────────────────
     return predict_heuristic(username, profile)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ENTRY POINT  — accepts URL as CLI arg OR JSON on stdin
+#  ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     try:
-        # Primary: URL passed as first command-line argument (used by server.js)
         if len(sys.argv) > 1:
             url     = sys.argv[1]
             profile = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         else:
-            # Fallback: read JSON from stdin
-            raw     = sys.stdin.read().strip()
+            raw = sys.stdin.read().strip()
             if not raw:
                 raise ValueError("No input received")
             data    = json.loads(raw)

@@ -10,7 +10,14 @@ require("dotenv").config();
 const app = express();
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://profileverifier.netlify.app",
+    "http://localhost:5000"
+  ],
+  methods: ["GET", "POST", "DELETE"],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -55,14 +62,14 @@ const authenticate = (req, res, next) => {
   });
 };
 
-// ─── Python helper (uses CLI args — no stdin stream issues on Windows) ────────
-function runPython(url) {
+// ─── Python helper ────────────────────────────────────────────────────────────
+// Passes URL + optional profile metadata as CLI args (works reliably on Windows).
+// profile shape (all optional): { followers, following, posts, has_pic, verified, bio_len }
+function runPython(url, profile = {}) {
   return new Promise((resolve, reject) => {
-    const pyPath  = process.env.PYTHON_PATH || "python";
-    const script  = path.join(__dirname, "ml", "predict.py");
-
-    // Pass URL as command-line argument — completely avoids stdin/stdinData issues
-    const proc = spawn(pyPath, [script, url]);
+    const pyPath = process.env.PYTHON_PATH || "python";
+    const script = path.join(__dirname, "ml", "predict.py");
+    const proc   = spawn(pyPath, [script, url, JSON.stringify(profile)]);
 
     let stdout = "";
     let stderr = "";
@@ -76,8 +83,9 @@ function runPython(url) {
     });
 
     proc.on("error", err => {
-      reject(new Error(`Could not start Python (${pyPath}): ${err.message}. ` +
-        `Check PYTHON_PATH in .env`));
+      reject(new Error(
+        `Could not start Python (${pyPath}): ${err.message}. Check PYTHON_PATH in .env`
+      ));
     });
 
     proc.on("close", code => {
@@ -91,7 +99,7 @@ function runPython(url) {
       }
       try {
         resolve(JSON.parse(trimmed));
-      } catch (e) {
+      } catch {
         reject(new Error(`Could not parse Python output: ${trimmed}`));
       }
     });
@@ -146,7 +154,9 @@ app.post("/api/signin", async (req, res) => {
 // ─── Verify Route ─────────────────────────────────────────────────────────────
 app.post("/api/verify", authenticate, async (req, res) => {
   try {
-    const { url, platform } = req.body;
+    // ✅ FIX: profile is now properly destructured from req.body
+    const { url, platform, profile } = req.body;
+
     if (!url || !platform)
       return res.status(400).json({ message: "URL and platform are required." });
 
@@ -154,8 +164,10 @@ app.post("/api/verify", authenticate, async (req, res) => {
       return res.status(400).json({ message: "Please enter a valid URL." });
     }
 
-    // Run Python — URL passed as CLI argument (works reliably on Windows)
-    const result = await runPython(url);
+    // profile is optional — safe default to empty object if not sent by frontend
+    const profileData = (profile && typeof profile === "object") ? profile : {};
+
+    const result = await runPython(url, profileData);
 
     if (result.error && !result.prediction) {
       return res.status(500).json({ message: "Python error: " + result.error });
@@ -167,9 +179,9 @@ app.post("/api/verify", authenticate, async (req, res) => {
       platform,
       prediction: result.prediction,
       confidence: result.confidence,
-      username:   result.username  || "",
-      score:      result.score     || 0,
-      method:     result.method    || "heuristic",
+      username:   result.username || "",
+      score:      result.score    || 0,
+      method:     result.method   || "heuristic",
     });
 
     res.json({
@@ -191,7 +203,7 @@ app.get("/api/history", authenticate, async (req, res) => {
   try {
     const { platform, result } = req.query;
     const query = { userId: req.user.id };
-    if (platform && platform !== "all") query.platform = platform;
+    if (platform && platform !== "all") query.platform   = platform;
     if (result   && result   !== "all") query.prediction = result === "fake" ? "Fake" : "Real";
     const history = await Verification.find(query).sort({ timestamp: -1 }).limit(200);
     res.json(history);
