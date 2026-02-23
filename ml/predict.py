@@ -53,13 +53,13 @@ try:
                     _model_metrics = _meta.get("metrics", {})
             _using_ml = True
         else:
-            _model = _scaler = None   # broken / single-class model
+            _model = _scaler = None
 except Exception:
     pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CONSTANTS  (kept in sync with train_model.py)
+#  CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 SUSPICIOUS_KW = {
     "bot", "fake", "scam", "spam", "hack", "temp", "xyz", "anon",
@@ -91,19 +91,66 @@ def extract_username(url: str) -> str:
     return parts[-1] if parts else url.split("/")[-1]
 
 
+def _looks_like_birthdate(digits_str: str) -> bool:
+    """
+    Return True if a digit string looks like a birth date or year.
+    Covers common patterns people use in usernames:
+      - 4 digits: year-like (1990–2015) e.g. "john1995"
+      - 6 digits: DDMMYY or MMDDYY or YYYYMM e.g. "pranali200518"
+      - 8 digits: DDMMYYYY or MMDDYYYY       e.g. "john20051998"
+    """
+    d = digits_str
+    n = len(d)
+
+    if n == 4:
+        year = int(d)
+        return 1960 <= year <= 2015   # realistic birth year
+
+    if n == 6:
+        # Could be DDMMYY, MMDDYY, YYMMDD, or partial date like 200518
+        # Check if any 2-digit sub-chunk looks like day/month/year
+        pairs = [int(d[i:i+2]) for i in range(0, 6, 2)]
+        # At least one pair should be a plausible day (1-31) or month (1-12)
+        has_day   = any(1 <= p <= 31 for p in pairs)
+        has_month = any(1 <= p <= 12 for p in pairs)
+        has_year  = any(p >= 18 for p in pairs)   # 18-99 → 1918-1999 or 2018-2099
+        return has_day and has_month and has_year
+
+    if n == 8:
+        # DDMMYYYY or MMDDYYYY
+        try:
+            day_month = int(d[:2]), int(d[2:4])
+            year      = int(d[4:])
+            plausible = (
+                (1 <= day_month[0] <= 31 and 1 <= day_month[1] <= 12 and 1960 <= year <= 2015)
+                or
+                (1 <= day_month[1] <= 31 and 1 <= day_month[0] <= 12 and 1960 <= year <= 2015)
+            )
+            return plausible
+        except Exception:
+            return False
+
+    return False
+
+
+def _is_name_with_birthdate(username: str) -> bool:
+    """
+    Return True if username looks like  <realname><birthdate>
+    e.g. pranali200518, john1995, sarah_doe19920304
+    Pattern: starts with 3+ alpha chars, ends with 4/6/8 digit date-like suffix.
+    """
+    u = username.strip()
+    # Allow underscores/dots between name and digits
+    m = re.match(r"^[a-zA-Z][a-zA-Z._]{2,}[._]?(\d{4}|\d{6}|\d{8})$", u)
+    if not m:
+        return False
+    return _looks_like_birthdate(m.group(1))
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  FEATURE EXTRACTION
-#  22 features — superset of the 20 used during training.
-#  The ML path selects exactly the names stored in features.json.
-#  The heuristic path uses all 22.
 # ══════════════════════════════════════════════════════════════════════════════
 def build_features(username: str, profile: dict = None) -> dict:
-    """
-    Return a dict of numeric features.
-
-    profile keys (all optional):
-        followers, following, posts, has_pic, verified, bio_len
-    """
     if profile is None:
         profile = {}
 
@@ -152,8 +199,7 @@ def build_features(username: str, profile: dict = None) -> dict:
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HARD-RULE PRE-CHECK
-#  Runs BEFORE the ML model — catches cases where username signals are
-#  unambiguous regardless of what the model was trained on.
+#  Runs BEFORE the ML model.
 # ══════════════════════════════════════════════════════════════════════════════
 def hard_rules(username: str):
     """
@@ -168,7 +214,12 @@ def hard_rules(username: str):
     vowels_n = sum(c in VOWELS for c in u)
     d_ratio  = digits / (n + 1e-5)
 
-    # ── Absolute rules ────────────────────────────────────────────────────
+    # ── Whitelist — always Real, skip all fake rules ───────────────────────
+    # Real people commonly use name + birthdate (e.g. pranali200518, john1995)
+    if _is_name_with_birthdate(u):
+        return False, 0.85, "name_with_birthdate"
+
+    # ── Absolute fake rules ───────────────────────────────────────────────
     if n <= 1:
         return True, 0.97, "single_char_username"
 
@@ -185,8 +236,7 @@ def hard_rules(username: str):
     if re.match(r"^[a-f0-9]{8,}$", lower):
         return True, 0.93, "uuid_like_username"
 
-    # ── Compound rules — suspicious keyword + at least one digit signal ──
-    # These catch patterns like: botaccount9274, fakeperson123456, spamuser88
+    # ── Compound rules — suspicious keyword + digit signal ────────────────
     has_sus_kw      = any(kw in lower for kw in SUSPICIOUS_KW)
     has_trailing4   = bool(re.search(r"\d{4,}$", u))
     has_digit_block = bool(re.search(r"[A-Za-z]{2,}\d{4,}", u))
@@ -194,11 +244,9 @@ def hard_rules(username: str):
     if has_sus_kw and (has_trailing4 or has_digit_block or d_ratio > 0.30):
         return True, 0.91, "suspicious_keyword_plus_digits"
 
-    # Suspicious keyword with no vowels (e.g. "btkr_xyz", "spmbrt")
     if has_sus_kw and n >= 5 and vowels_n == 0:
         return True, 0.89, "suspicious_keyword_no_vowels"
 
-    # Suspicious keyword alone — still fairly strong signal
     if has_sus_kw:
         return True, 0.82, "suspicious_keyword"
 
@@ -209,10 +257,8 @@ def hard_rules(username: str):
 #  ML MODEL PATH
 # ══════════════════════════════════════════════════════════════════════════════
 def predict_with_model(username: str, profile: dict = None) -> dict:
-    """Use the trained RandomForest model for prediction."""
     fv  = build_features(username, profile)
 
-    # Select and order features exactly as seen during training
     if _feature_names:
         vec = [fv.get(name, 0.0) for name in _feature_names]
     else:
@@ -236,7 +282,6 @@ def predict_with_model(username: str, profile: dict = None) -> dict:
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HEURISTIC FALLBACK
-#  Used when no trained model is available.
 # ══════════════════════════════════════════════════════════════════════════════
 WEIGHTS = {
     "only_one_char":        0.40,
@@ -292,13 +337,6 @@ def predict_heuristic(username: str, profile: dict = None) -> dict:
 #  MAIN DISPATCHER
 # ══════════════════════════════════════════════════════════════════════════════
 def predict(url: str, profile: dict = None) -> dict:
-    """
-    Full prediction pipeline:
-      1. Extract username from URL
-      2. Apply hard rules  ← always runs, even if ML model is loaded
-      3. ML model (if available)
-      4. Heuristic fallback
-    """
     username = extract_username(url)
 
     if not username:
@@ -314,7 +352,7 @@ def predict(url: str, profile: dict = None) -> dict:
     if is_fake is not None:
         fv = build_features(username, profile)
         return {
-            "prediction": "Fake",
+            "prediction": "Fake" if is_fake else "Real",
             "confidence": conf,
             "method":     f"hard_rule:{reason}",
             "username":   username,
